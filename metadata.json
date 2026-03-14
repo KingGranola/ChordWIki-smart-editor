@@ -1,0 +1,5 @@
+{
+  "name": "ChordWIki smart editor",
+  "description": "A GUI editor for ChordWiki format with real-time preview, drag-and-drop chord placement, and transposition features.",
+  "requestFramePermissions": []
+}

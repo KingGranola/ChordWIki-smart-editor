@@ -1,11 +1,45 @@
-<div align="center">
+# ChordWiki Editor
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+## 概要 (Overview)
+ChordWiki Editorは、弾き語りやバンドスコアでよく使われる「ChordWiki形式（歌詞の間に `[C]` のようにコードを埋め込むテキストフォーマット）」のデータを、直感的なGUIで作成・編集できるWebアプリケーションです。
 
-  <h1>Built with AI Studio</h2>
+プログラミングや特殊な記法の知識がないユーザーでも、パレットからコードをドラッグ＆ドロップするだけで、実際のChordWikiサイトでの表示と同じレイアウトを確認しながらコード譜を作成できます。
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 主な機能 (Features)
+- **ビジュアルエディタ (Visual Editor)**: 
+  - 実際のChordWikiのレンダリング結果（コードの文字幅によって下の歌詞が右に押し出されるレイアウト）をエディタ上で再現。
+  - コードパレットからのドラッグ＆ドロップによる直感的なコード配置。
+  - 配置済みコードの左右移動（ドラッグ＆ドロップ）、クリックによるコードネームの直接編集・削除。
+  - 歌詞の末尾（空白部分）へのコード配置にも対応。
+- **歌詞入力 (Lyrics Input)**: 
+  - 左ペインのテキストエリアで歌詞のみを一括入力・編集可能。
+  - 歌詞を変更しても、配置済みのコードの位置（インデックス）は可能な限り維持されます。
+- **メタデータ編集 & トランスポーズ (Metadata & Transpose)**:
+  - タイトル、サブタイトル、キー、コメントの編集。
+  - キー（ルート音とメジャー/マイナー）のプルダウン選択。
+  - `+1` `-1` ボタンによる曲全体のコード移調（トランスポーズ）。キーのメタデータも自動的に追従します。
+- **インポート & エクスポート (Import & Export)**:
+  - 既存のChordWikiテキストを貼り付けて読み込むインポート機能。
+  - シンタックスハイライト付きのダークモード画面で結果を確認し、クリップボードにコピーできるエクスポート機能。
+- **履歴管理 (Undo / Redo)**:
+  - 編集操作の取り消し、やり直し機能。
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## 技術スタック (Tech Stack)
+- **Framework**: React 18 (Vite)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Icons**: Lucide React
 
-</div>
+## 開発環境のセットアップ (Getting Started)
+\`\`\`bash
+# 依存関係のインストール
+npm install
+
+# 開発サーバーの起動
+npm run dev
+\`\`\`
+
+## プロジェクト構成 (Project Structure)
+- \`src/App.tsx\`: メインのUIコンポーネント。レイアウト、状態管理、ドラッグ＆ドロップのイベントハンドリング、モーダル制御などを担当。
+- \`src/utils/chordwiki.ts\`: ChordWikiテキストのパース（解析）、シリアライズ（文字列化）、トランスポーズ処理などのコアロジックを配置。
+- \`src/hooks/useHistory.ts\`: Undo/Redoを実現するためのカスタムフック。
