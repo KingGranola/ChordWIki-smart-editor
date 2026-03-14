@@ -1,17 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LayoutTemplate } from 'lucide-react';
 import { SongData, EditingChord, Line } from './types';
 import { parseChordWiki, transposeChord, generateId, serializeChordWiki, splitImportText, serializeToPlainText } from './utils/chordwiki';
 import { useHistory } from './hooks/useHistory';
 import { INITIAL_TEXT } from './constants';
+import { VoicingMode, getChordVoicing } from './utils/voicing';
+import { initAudio, playNotes, stopAudio } from './utils/audio';
+import * as Tone from 'tone';
 
 import { Header } from './components/Header';
 import { LyricsPanel } from './components/LyricsPanel';
 import { ChordPalette } from './components/ChordPalette';
+import { PlaybackPanel } from './components/PlaybackPanel';
 import { LineRow } from './components/LineRow';
 import { ImportModal } from './components/ImportModal';
 import { ExportModal } from './components/ExportModal';
 import { HelpModal } from './components/HelpModal';
+import { LoadingModal } from './components/LoadingModal';
 
 // ---------------------------------------------------------------------------
 
@@ -30,6 +35,19 @@ export default function App() {
   const [showExport, setShowExport] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Playback state
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [bpm, setBpm] = useState(120);
+  const [voicingMode, setVoicingMode] = useState<VoicingMode>('Shell');
+  const [playingChordId, setPlayingChordId] = useState<string | null>(null);
+  const [isAudioReady, setIsAudioReady] = useState(false);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  
+  const playbackRef = useRef<NodeJS.Timeout | null>(null);
+  const prevNotesRef = useRef<number[] | null>(null);
+  const clearPlayingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [localHeader, setLocalHeader] = useState('');
   const [localBody, setLocalBody] = useState('');
@@ -65,6 +83,137 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
+
+  // ---- Playback Logic ------------------------------------------------------
+
+  const handleInitAudio = useCallback(async () => {
+    if (isAudioReady) return;
+    setIsAudioLoading(true);
+    try {
+      await initAudio();
+      setIsAudioReady(true);
+    } catch (err) {
+      console.error("Failed to init audio", err);
+    } finally {
+      setIsAudioLoading(false);
+    }
+  }, [isAudioReady]);
+
+  const playChord = useCallback(async (chordName: string, chordId: string, autoPlay: boolean = false) => {
+    if (!isAudioReady) {
+      await handleInitAudio();
+    }
+    setPlayingChordId(chordId);
+    const notes = getChordVoicing(chordName, voicingMode, prevNotesRef.current);
+    prevNotesRef.current = notes;
+    playNotes(notes, "2n");
+
+    if (clearPlayingTimeoutRef.current) {
+      clearTimeout(clearPlayingTimeoutRef.current);
+    }
+    
+    if (!autoPlay) {
+      clearPlayingTimeoutRef.current = setTimeout(() => {
+        setPlayingChordId(null);
+      }, 500);
+    }
+  }, [voicingMode, isAudioReady, handleInitAudio]);
+
+  const getAllChords = useCallback(() => {
+    const allChords: { id: string, chord: string }[] = [];
+    state.headerLines.forEach(line => {
+      if (!line.type || line.type === 'lyric') {
+        allChords.push(...[...line.chords].sort((a, b) => a.position - b.position));
+      }
+    });
+    state.lines.forEach(line => {
+      if (!line.type || line.type === 'lyric') {
+        allChords.push(...[...line.chords].sort((a, b) => a.position - b.position));
+      }
+    });
+    return allChords;
+  }, [state]);
+
+  useEffect(() => {
+    let part: Tone.Part | null = null;
+    let isCancelled = false;
+
+    const startPlayback = async () => {
+      if (!isAudioReady) {
+        await handleInitAudio();
+      }
+      
+      if (isCancelled) return;
+
+      const chords = getAllChords();
+      if (chords.length === 0) {
+        setIsPlaying(false);
+        return;
+      }
+      
+      Tone.Transport.bpm.value = bpm;
+      prevNotesRef.current = null; // Reset voice leading
+      
+      const events = chords.map((c, i) => {
+        const time = i * (60 / bpm) * 2; // 2 beats per chord
+        return { time, chordObj: c };
+      });
+
+      part = new Tone.Part((time, value) => {
+        const { chordObj } = value;
+        const notes = getChordVoicing(chordObj.chord, voicingMode, prevNotesRef.current);
+        prevNotesRef.current = notes;
+        
+        playNotes(notes, "2n", time);
+        
+        Tone.Draw.schedule(() => {
+          setPlayingChordId(chordObj.id);
+        }, time);
+      }, events).start(0);
+
+      const totalTime = chords.length * (60 / bpm) * 2;
+      
+      Tone.Transport.schedule(() => {
+        Tone.Draw.schedule(() => {
+          setIsPlaying(false);
+          setPlayingChordId(null);
+        }, Tone.now());
+      }, totalTime);
+
+      Tone.Transport.start();
+    };
+
+    if (isPlaying) {
+      startPlayback();
+    } else {
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      if (part) {
+        part.dispose();
+      }
+      setPlayingChordId(null);
+      stopAudio();
+    }
+    
+    return () => {
+      isCancelled = true;
+      Tone.Transport.stop();
+      Tone.Transport.cancel();
+      if (part) {
+        part.dispose();
+      }
+    };
+  }, [isPlaying, bpm, getAllChords, voicingMode, isAudioReady, handleInitAudio]);
+
+  const handleTogglePreview = useCallback(() => {
+    const newMode = !isPreviewMode;
+    setIsPreviewMode(newMode);
+    setIsPlaying(false);
+    setEditingChord(null);
+    if (newMode) {
+      handleInitAudio();
+    }
+  }, [isPreviewMode, handleInitAudio]);
 
   // ---- Handlers ------------------------------------------------------------
 
@@ -230,6 +379,8 @@ export default function App() {
       <Header
         canUndo={canUndo}
         canRedo={canRedo}
+        isPreviewMode={isPreviewMode}
+        onTogglePreview={handleTogglePreview}
         onUndo={undo}
         onRedo={redo}
         onImport={() => setShowImport(true)}
@@ -239,22 +390,39 @@ export default function App() {
       />
 
       <div className="app-body">
-        <LyricsPanel
-          headerValue={localHeader}
-          bodyValue={localBody}
-          onChange={handleLyricsChange}
-          onFocus={() => setIsTyping(true)}
-          onBlur={() => setIsTyping(false)}
-          onTranspose={handleTranspose}
-        />
+        {!isPreviewMode && (
+          <LyricsPanel
+            headerValue={localHeader}
+            bodyValue={localBody}
+            onChange={handleLyricsChange}
+            onFocus={() => setIsTyping(true)}
+            onBlur={() => setIsTyping(false)}
+            onTranspose={handleTranspose}
+          />
+        )}
 
         <div className="editor-panel">
           <div className="editor-scroll">
-            <ChordPalette 
-              songKey={state.meta.key} 
-              onDragStartItem={setDragItem}
-              onDragEndItem={() => setDragItem(null)}
-            />
+            {isPreviewMode ? (
+              <PlaybackPanel
+                isAudioReady={isAudioReady}
+                isAudioLoading={isAudioLoading}
+                onInitAudio={handleInitAudio}
+                isPlaying={isPlaying}
+                onPlay={() => setIsPlaying(true)}
+                onStop={() => setIsPlaying(false)}
+                bpm={bpm}
+                onBpmChange={setBpm}
+                voicingMode={voicingMode}
+                onVoicingModeChange={setVoicingMode}
+              />
+            ) : (
+              <ChordPalette 
+                songKey={state.meta.key} 
+                onDragStartItem={setDragItem}
+                onDragEndItem={() => setDragItem(null)}
+              />
+            )}
 
             <div className="lines-area font-sans">
               {state.meta.title && (
@@ -291,6 +459,8 @@ export default function App() {
                         editingChord={editingChord}
                         dragOver={dragOver}
                         dragItem={dragItem}
+                        isPreviewMode={isPreviewMode}
+                        playingChordId={playingChordId}
                         onDragStartItem={setDragItem}
                         onDragEndItem={() => setDragItem(null)}
                         onEditLine={() => setEditingLine(line.id)}
@@ -301,9 +471,13 @@ export default function App() {
                         onClickChar={pos =>
                           setEditingChord({ lineId: line.id, position: pos, initialValue: '' })
                         }
-                        onClickChord={(chordId, pos, chord) =>
-                          setEditingChord({ lineId: line.id, position: pos, chordId, initialValue: chord })
-                        }
+                        onClickChord={(chordId, pos, chord) => {
+                          if (isPreviewMode) {
+                            playChord(chord, chordId, false);
+                          } else {
+                            setEditingChord({ lineId: line.id, position: pos, chordId, initialValue: chord });
+                          }
+                        }}
                         onDragOverChar={(lid, pos) => setDragOver({ lineId: lid, position: pos })}
                         onDragLeave={() => setDragOver(null)}
                         onDrop={handleDropChord}
@@ -345,6 +519,8 @@ export default function App() {
                         editingChord={editingChord}
                         dragOver={dragOver}
                         dragItem={dragItem}
+                        isPreviewMode={isPreviewMode}
+                        playingChordId={playingChordId}
                         onDragStartItem={setDragItem}
                         onDragEndItem={() => setDragItem(null)}
                         onEditLine={() => setEditingLine(line.id)}
@@ -355,9 +531,13 @@ export default function App() {
                         onClickChar={pos =>
                           setEditingChord({ lineId: line.id, position: pos, initialValue: '' })
                         }
-                        onClickChord={(chordId, pos, chord) =>
-                          setEditingChord({ lineId: line.id, position: pos, chordId, initialValue: chord })
-                        }
+                        onClickChord={(chordId, pos, chord) => {
+                          if (isPreviewMode) {
+                            playChord(chord, chordId, false);
+                          } else {
+                            setEditingChord({ lineId: line.id, position: pos, chordId, initialValue: chord });
+                          }
+                        }}
                         onDragOverChar={(lid, pos) => setDragOver({ lineId: lid, position: pos })}
                         onDragLeave={() => setDragOver(null)}
                         onDrop={handleDropChord}
@@ -407,6 +587,8 @@ export default function App() {
             </div>
           </div>
         )}
+
+        <LoadingModal isOpen={isAudioLoading} />
       </div>
     </div>
   );

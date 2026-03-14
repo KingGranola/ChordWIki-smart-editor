@@ -1,9 +1,11 @@
 import React from 'react';
-import { Undo2, Redo2, Music2, Upload, Download, HelpCircle, Trash2 } from 'lucide-react';
+import { Undo2, Redo2, Music2, Upload, Download, HelpCircle, Trash2, PlayCircle, Edit2 } from 'lucide-react';
 
 interface HeaderProps {
   canUndo: boolean;
   canRedo: boolean;
+  isPreviewMode: boolean;
+  onTogglePreview: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onImport: () => void;
@@ -13,10 +15,15 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  canUndo, canRedo, onUndo, onRedo, onImport, onExport, onHelp, onClear
+  canUndo, canRedo, isPreviewMode, onTogglePreview, onUndo, onRedo, onImport, onExport, onHelp, onClear
 }) => (
   <header className="header-bar">
     <div className="flex items-center gap-2 flex-1">
+      <button onClick={onTogglePreview} className={`btn-header ${isPreviewMode ? 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]' : 'text-[var(--accent)] hover:bg-[var(--accent-dim)]'}`} title={isPreviewMode ? "Switch to Edit Mode" : "Switch to Preview Mode"}>
+        {isPreviewMode ? <Edit2 className="w-4 h-4" /> : <PlayCircle className="w-4 h-4" />} 
+        {isPreviewMode ? "Edit Mode" : "Preview Mode"}
+      </button>
+      <div className="w-px h-6 bg-[var(--border)] mx-1"></div>
       <button onClick={onHelp} className="btn-header" title="Help">
         <HelpCircle className="w-4 h-4" /> Help
       </button>
